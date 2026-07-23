@@ -1,0 +1,1 @@
+(globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push(["object"==typeof document?document.currentScript:void 0,37692,e=>{"use strict";var r=e.i(73576);e.s(["ServiceWorkerRegister",0,function(){return(0,r.useEffect)(()=>{"serviceWorker"in navigator&&navigator.serviceWorker.register("/RallyCut/sw.js").catch(()=>void 0)},[]),null}])}]);
