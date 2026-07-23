@@ -43,3 +43,7 @@ next-env.d.ts
 # luffy: SQLite 本地数据目录与运行日志
 data/
 *.log
+
+# 本地部署产物目录 (gh-pages 分支推送用) 与原始源码压缩包
+/gh-pages-deploy/
+/code-archive-*.tar.gz
