@@ -1,0 +1,41 @@
+{
+  "name": "rallycut-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "RallyCut desktop (Electron wrapper of the static build)",
+  "main": "main.js",
+  "overrides": {
+    "@noble/hashes": "1.8.0"
+  },
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win portable"
+  },
+  "build": {
+    "appId": "com.rallycut.app",
+    "productName": "RallyCut",
+    "files": [
+      "main.js"
+    ],
+    "extraResources": [
+      {
+        "from": "../out",
+        "to": "out"
+      }
+    ],
+    "win": {
+      "target": "portable",
+      "icon": "icon.ico"
+    },
+    "portable": {
+      "artifactName": "RallyCut-portable.${ext}"
+    },
+    "directories": {
+      "output": "dist"
+    }
+  },
+  "devDependencies": {
+    "electron": "^41.7.1",
+    "electron-builder": "^26.15.3"
+  }
+}

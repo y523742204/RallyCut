@@ -47,3 +47,10 @@ data/
 # 本地部署产物目录 (gh-pages 分支推送用) 与原始源码压缩包
 /gh-pages-deploy/
 /code-archive-*.tar.gz
+
+# 桌面打包目录的依赖与产物
+/desktop/node_modules/
+/desktop/dist/
+
+# Hermes 本地计划文件
+/.hermes/
