@@ -1,0 +1,5 @@
+{
+  "stack": "nextjs-fullstack",
+  "install": "pnpm install --no-frozen-lockfile",
+  "check": "pnpm run build"
+}

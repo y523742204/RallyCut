@@ -1,0 +1,8 @@
+services:
+  web:
+    build: .
+    labels:
+      - "luffy.entrypoint=true"
+      - "luffy.port=3000"
+    environment:
+      NODE_ENV: "production"
