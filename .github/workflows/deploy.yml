@@ -1,0 +1,52 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gh-pages
+  cancel-in-progress: true
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build static site
+        run: pnpm run build
+
+      - name: Push out/ to gh-pages branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin gh-pages
+          git worktree add .deploy gh-pages
+          find .deploy -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -r out/. .deploy/
+          touch .deploy/.nojekyll
+          cd .deploy
+          git add -A
+          if git diff --cached --quiet; then
+            echo "no changes to deploy"
+          else
+            git commit -m "deploy: ${{ github.sha }}"
+            git push origin gh-pages
+          fi
