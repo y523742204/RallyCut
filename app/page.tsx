@@ -231,6 +231,10 @@ export default function Home() {
       setScores(displayScores);
       setProgress(100);
       setStatus('done');
+      if (finalSegments.length === 0) {
+        setMessage('未识别到有效回合：视频可能过短或画面变化太小，请换一段素材重试');
+        return;
+      }
       if (audioSegmentation.usedAudio) setMessage(`已按 ${audio.hitCount} 个击球峰值与持续无峰值时间识别 ${finalSegments.length} 个回合`);
       else setMessage(`已识别 ${finalSegments.length} 个回合；${audioSegmentation.reason}，已改用画面运动切分`);
       await seekTo(video, finalSegments[0].start);

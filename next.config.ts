@@ -14,7 +14,6 @@ const nextConfig: NextConfig = {
   basePath: "/RallyCut",
   // 同步注入到客户端 bundle, 供 lib/export-mp4.ts 拼接 /ffmpeg 静态资源路径.
   env: { NEXT_PUBLIC_BASE_PATH: "/RallyCut" },
-  serverExternalPackages: ["better-sqlite3"],
   allowedDevOrigins: ["*.e2b.app", "*.e2b.dev"],
 };
 
