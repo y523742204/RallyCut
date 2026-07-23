@@ -20,6 +20,8 @@ const eslintConfig = defineConfig([
     "static-server.js",
     // Service Worker 运行在独立全局作用域 (self/caches), 不参与 lint:
     "public/sw.js",
+    // Electron 桌面壳是独立的 CommonJS 项目, 不参与 Next 应用 lint:
+    "desktop/**",
   ]),
 ]);
 
