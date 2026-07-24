@@ -254,6 +254,19 @@ export default function Home() {
     setSegments(items => items.map(item => item.id === id ? { ...item, ...patch } : item));
   };
 
+  // 波形框选手动创建回合: 与现有回合重叠时拒绝, 插入后按时间排序并重排 id
+  const addSegment = (start: number, end: number) => {
+    if (segments.some(s => start < s.end - 0.1 && end > s.start + 0.1)) {
+      setMessage('新回合与现有回合重叠，请拖动手柄调整范围后再创建');
+      return;
+    }
+    setSegments(prev => [...prev, { id: 0, start, end, score: 1, keep: true }]
+      .sort((a, b) => a.start - b.start)
+      .map((s, index) => ({ ...s, id: index + 1 })));
+    setMessage(`已创建新回合（${formatTime(start)} - ${formatTime(end)}），默认加入合集`);
+    jumpTo(start);
+  };
+
   const jumpTo = (time: number) => {
     const video = videoRef.current;
     if (!video) return;
@@ -423,7 +436,7 @@ export default function Home() {
               <p className="px-2 text-center text-[11px] leading-5 text-black/40">全程在本机处理；无法直接录制 MP4 时会自动转换，长视频需要更多时间。</p>
             </aside>
 
-            {audioAnalysis && <AudioWaveform analysis={audioAnalysis} duration={duration} currentTime={currentTime} segments={segments} segmentation={segmentationInfo} onSeek={jumpTo} />}
+            {audioAnalysis && <AudioWaveform analysis={audioAnalysis} duration={duration} currentTime={currentTime} segments={segments} segmentation={segmentationInfo} onSeek={jumpTo} onAddSegment={addSegment} />}
             {segments.length > 0 && <section className="xl:col-span-2 rounded-[24px] border border-black/[0.07] bg-white p-5 shadow-[0_16px_50px_rgba(20,35,25,0.055)] sm:p-6">
               <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center"><div><h2 className="text-lg font-semibold tracking-tight">分回合选择与下载</h2><p className="mt-1 text-xs text-black/40">打开开关加入合集，或在回合卡片中单独下载 MP4</p></div><div className="flex flex-wrap items-center gap-2 text-xs"><span className="mr-1 text-black/45">已选 {keptSegments.length}/{segments.length}</span><button onClick={() => setSegments(items => items.map(item => ({ ...item, keep: true })))} disabled={status === 'exporting'} className="rounded-lg bg-[#eaff9b] px-2.5 py-1.5 font-medium text-[#526d00] disabled:opacity-40">全选</button><button onClick={() => setSegments(items => items.map(item => ({ ...item, keep: false })))} disabled={status === 'exporting'} className="rounded-lg bg-black/[0.05] px-2.5 py-1.5 font-medium text-black/50 disabled:opacity-40">清空</button></div></div>
               <div className="relative mt-6 h-16 overflow-hidden rounded-xl bg-[#f1f3f1]">

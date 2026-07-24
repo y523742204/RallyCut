@@ -1,5 +1,6 @@
 'use client';
 
+import { useRef, useState } from 'react';
 import type { AudioAnalysis } from '@/lib/audio-analysis';
 import type { SegmentationMode } from '@/lib/rally-segmentation';
 
@@ -12,6 +13,7 @@ type Props = {
   segments: SegmentRange[];
   segmentation: { mode: SegmentationMode; reason: string; averageInterval: number; averageThreshold: number };
   onSeek: (time: number) => void;
+  onAddSegment: (start: number, end: number) => void;
 };
 
 const formatTime = (seconds: number) => {
@@ -32,7 +34,11 @@ const metric = (label: string, value: string, detail: string, accent = false) =>
   </div>
 );
 
-export function AudioWaveform({ analysis, duration, currentTime, segments, segmentation, onSeek }: Props) {
+export function AudioWaveform({ analysis, duration, currentTime, segments, segmentation, onSeek, onAddSegment }: Props) {
+  // 手动框选的草稿范围(尚未创建为回合)与当前拖拽状态
+  const [draft, setDraft] = useState<{ start: number; end: number } | null>(null);
+  const drag = useRef<{ mode: 'create' | 'start' | 'end'; anchor: number; moved: boolean } | null>(null);
+
   if (!analysis.available || !analysis.waveform.length) {
     return (
       <section className="xl:col-span-2 rounded-[24px] border border-black/[0.07] bg-white p-5 shadow-[0_16px_50px_rgba(20,35,25,0.055)] sm:p-6">
@@ -59,10 +65,46 @@ export function AudioWaveform({ analysis, duration, currentTime, segments, segme
   const averageInterval = segmentation.averageInterval || latestRhythm?.averageInterval || 0;
   const dynamicThreshold = segmentation.averageThreshold || latestRhythm?.waitThreshold || 2.5;
 
-  const handleSeek = (event: React.MouseEvent<SVGSVGElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / Math.max(1, rect.width)));
-    onSeek(ratio * duration);
+  const timeAt = (clientX: number, el: SVGSVGElement) => {
+    const rect = el.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(1, rect.width)));
+    return ratio * duration;
+  };
+
+  // 按下: 落在草稿手柄附近 -> 拖手柄微调; 否则开始框选新范围
+  const handlePointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
+    const t = timeAt(event.clientX, event.currentTarget);
+    const scale = Math.max(0.001, duration) / width;
+    let mode: 'create' | 'start' | 'end' = 'create';
+    if (draft) {
+      if (Math.abs(t - draft.start) <= 12 * scale) mode = 'start';
+      else if (Math.abs(t - draft.end) <= 12 * scale) mode = 'end';
+    }
+    drag.current = { mode, anchor: t, moved: mode !== 'create' };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
+    const d = drag.current;
+    if (!d) return;
+    const t = timeAt(event.clientX, event.currentTarget);
+    if (d.mode === 'create') {
+      if (!d.moved && Math.abs(t - d.anchor) < 0.25) return; // 位移太小视为单击
+      d.moved = true;
+      setDraft({ start: Math.min(d.anchor, t), end: Math.max(d.anchor, t) });
+    } else {
+      setDraft(prev => prev
+        ? (d.mode === 'start'
+          ? { ...prev, start: Math.min(t, prev.end - 0.5) }
+          : { ...prev, end: Math.max(t, prev.start + 0.5) })
+        : prev);
+    }
+  };
+
+  const handlePointerUp = (event: React.PointerEvent<SVGSVGElement>) => {
+    const d = drag.current;
+    drag.current = null;
+    if (d && d.mode === 'create' && !d.moved) onSeek(timeAt(event.clientX, event.currentTarget)); // 单击 = 跳转播放
   };
 
   return (
@@ -71,7 +113,7 @@ export function AudioWaveform({ analysis, duration, currentTime, segments, segme
         <div>
           <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-[#eaff9b] px-2.5 py-1 text-[10px] font-semibold text-[#526d00]"><span className="h-1.5 w-1.5 rounded-full bg-[#789800]" />完整音轨</div>
           <h2 className="text-lg font-semibold tracking-tight">音频曲线分析</h2>
-          <p className="mt-1 text-xs text-black/40">击球峰值开启并维持回合，持续无峰值超过动态阈值时结束；点击曲线可定位视频。</p>
+          <p className="mt-1 text-xs text-black/40">击球峰值开启并维持回合，持续无峰值超过动态阈值时结束；点击曲线定位视频，按住拖动可框选范围手动创建回合。</p>
           <div className="mt-2 flex flex-wrap gap-2 text-[10px]"><span className="rounded-full bg-black/[0.05] px-2.5 py-1 text-black/50">平均击球间隔 {averageInterval ? `${averageInterval.toFixed(2)}s` : '—'}</span><span className="rounded-full bg-black/[0.05] px-2.5 py-1 text-black/50">动态结束阈值 {dynamicThreshold.toFixed(2)}s</span></div>
         </div>
         <div className="flex flex-wrap gap-x-4 gap-y-2 text-[10px] text-black/45">
@@ -98,8 +140,22 @@ export function AudioWaveform({ analysis, duration, currentTime, segments, segme
           {metric('静音占比', `${Math.round(analysis.silenceRatio * 100)}%`, analysis.clippingEvents ? `${analysis.clippingEvents} 处疑似削波` : '未发现明显削波')}
         </div>
 
+        {draft && (
+          <div className="mt-4 flex flex-wrap items-center gap-2 rounded-2xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
+            <span className="font-medium">已选 {formatTime(draft.start)} - {formatTime(draft.end)}（{(draft.end - draft.start).toFixed(1)}s），可拖动两端手柄微调</span>
+            <span className="flex-1" />
+            <button
+              onClick={() => { onAddSegment(draft.start, draft.end); setDraft(null); }}
+              disabled={draft.end - draft.start < 1}
+              title={draft.end - draft.start < 1 ? '回合至少 1 秒' : undefined}
+              className="rounded-lg bg-[#17211b] px-3 py-1.5 font-semibold text-white transition hover:bg-black disabled:opacity-40"
+            >创建新回合</button>
+            <button onClick={() => setDraft(null)} className="rounded-lg px-2.5 py-1.5 font-medium text-sky-700 transition hover:bg-sky-100">取消</button>
+          </div>
+        )}
+
         <div className="mt-5 overflow-hidden rounded-2xl border border-black/[0.06] bg-[#111713] p-3 sm:p-4">
-          <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" onClick={handleSeek} className="h-40 w-full cursor-crosshair touch-manipulation" role="img" aria-label="音频波形，点击可定位视频">
+          <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} style={{ touchAction: 'pan-y' }} className="h-40 w-full cursor-crosshair" role="img" aria-label="音频波形，点击定位视频，拖动框选创建回合">
             <defs>
               <linearGradient id="audio-wave-fill" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="#d8ff45" stopOpacity="0.95" />
@@ -122,6 +178,22 @@ export function AudioWaveform({ analysis, duration, currentTime, segments, segme
             <path d={areaPath} fill="url(#audio-wave-fill)" />
             {analysis.hitTimes.map((time, index) => <line key={`hit-${index}`} x1={time / Math.max(0.001, duration) * width} x2={time / Math.max(0.001, duration) * width} y1="5" y2={height - 5} stroke="#ff7043" strokeWidth="2" opacity="0.9" />)}
             {analysis.silenceRegions.map((region, index) => { const x = Math.min(width, region.decisionTime / Math.max(0.001, duration) * width); return <g key={`decision-${index}`}><line x1={x} x2={x} y1="0" y2={height} stroke="#ff496c" strokeWidth="2" strokeDasharray="5 4" /><path d={`M ${x - 5} 2 L ${x + 5} 2 L ${x} 10 Z`} fill="#ff496c" /></g>; })}
+            {draft && (() => {
+              const x1 = draft.start / Math.max(0.001, duration) * width;
+              const x2 = draft.end / Math.max(0.001, duration) * width;
+              return (
+                <g>
+                  <rect x={x1} y="0" width={Math.max(1, x2 - x1)} height={height} fill="#38bdf8" opacity="0.22" />
+                  {([['start', x1], ['end', x2]] as const).map(([edge, x]) => (
+                    <g key={edge} style={{ cursor: 'ew-resize' }}>
+                      <rect x={x - 8} y="0" width="16" height={height} fill="transparent" />
+                      <rect x={x - 1.5} y="0" width="3" height={height} fill="#0284c7" />
+                      <rect x={x - 4} y={middle - 14} width="8" height="28" rx="3" fill="#0284c7" />
+                    </g>
+                  ))}
+                </g>
+              );
+            })()}
             <line x1={playheadX} x2={playheadX} y1="0" y2={height} stroke="white" strokeWidth="2" />
             <circle cx={playheadX} cy="8" r="5" fill="white" />
           </svg>
