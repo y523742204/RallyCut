@@ -284,6 +284,40 @@ const transcodeSourceRanges = async (
   }
 };
 
+// 将浏览器无法解码的源视频 (如 H.265/HEVC、10-bit) 转码为通用 H.264 MP4, 全程本机完成
+export async function transcodeSourceToPlayableMp4(
+  sourceFile: File,
+  onProgress: (progress: number) => void,
+): Promise<Blob> {
+  const ffmpeg = await getFFmpeg();
+  const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const extension = sourceFile.name.split('.').pop()?.replace(/[^a-z0-9]/gi, '') || 'mp4';
+  const inputName = `raw-${token}.${extension}`;
+  const outputName = `h264-${token}.mp4`;
+  conversionProgress = value => onProgress(Math.max(2, Math.round(value * 100)));
+
+  try {
+    await ffmpeg.writeFile(inputName, new Uint8Array(await sourceFile.arrayBuffer()));
+    const timeout = Math.min(20 * 60 * 1000, Math.max(5 * 60 * 1000, (sourceFile.size / 1024 / 1024) * 2500));
+    const result = await execWithTimeout(ffmpeg, [
+      '-i', inputName,
+      '-map', '0:v:0', '-map', '0:a?',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', outputName,
+    ], timeout);
+    if (result !== 0) throw new Error('视频转码失败');
+    return await readMp4Blob(ffmpeg, outputName);
+  } catch (error) {
+    if (error instanceof RangeError) throw new Error('设备内存不足，无法在本机转码该视频；请先用格式工厂等工具转为 H.264 后再上传');
+    throw error instanceof Error ? error : new Error('视频转码失败，请重试');
+  } finally {
+    conversionProgress = null;
+    try { await ffmpeg.deleteFile(inputName); } catch {}
+    try { await ffmpeg.deleteFile(outputName); } catch {}
+    if (isIOSSafariBrowser()) releaseFFmpeg(ffmpeg);
+  }
+}
+
 export async function exportHighlightsToMp4({ video, sourceFile, segments, totalDuration, onStage, onProgress }: ExportOptions) {
   const captureVideo = video as CaptureVideo;
   const capture = captureVideo.captureStream?.bind(captureVideo) ?? captureVideo.mozCaptureStream?.bind(captureVideo);

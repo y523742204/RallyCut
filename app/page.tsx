@@ -1,7 +1,7 @@
 'use client';
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { exportHighlightsToMp4 } from '@/lib/export-mp4';
+import { exportHighlightsToMp4, transcodeSourceToPlayableMp4 } from '@/lib/export-mp4';
 import { analyzeAudioTrack, type AudioAnalysis } from '@/lib/audio-analysis';
 import { AudioWaveform } from './audio-waveform';
 import { buildAudioRallySegments, buildCombinedRallySegments, buildMotionRallySegments, type SegmentationMode } from '@/lib/rally-segmentation';
@@ -105,6 +105,8 @@ export default function Home() {
   const [audioAnalysis, setAudioAnalysis] = useState<AudioAnalysis | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [segmentationInfo, setSegmentationInfo] = useState<{ mode: SegmentationMode; reason: string; averageInterval: number; averageThreshold: number }>({ mode: 'motion', reason: '', averageInterval: 0, averageThreshold: 2.5 });
+  const [needsTranscode, setNeedsTranscode] = useState(false);
+  const [transcoding, setTranscoding] = useState(false);
 
   useEffect(() => () => { if (videoUrl) URL.revokeObjectURL(videoUrl); }, [videoUrl]);
   useEffect(() => {
@@ -142,6 +144,8 @@ export default function Home() {
     setMessage('');
     setStatus('ready');
     setIsPreviewing(false);
+    setNeedsTranscode(false);
+    setTranscoding(false);
   };
 
   const analyze = async () => {
@@ -272,6 +276,25 @@ export default function Home() {
   const deleteSegment = (id: number) => {
     setSegments(prev => prev.filter(s => s.id !== id).map((s, index) => ({ ...s, id: index + 1 })));
     setMessage('已删除该回合');
+  };
+
+  // 浏览器无法解码时: 本机转码为 H.264 后重新加载
+  const transcodeSource = async () => {
+    if (!file || transcoding) return;
+    setTranscoding(true);
+    setProgress(0);
+    setMessage('正在本机转码为 H.264（不上传服务器）…');
+    try {
+      const blob = await transcodeSourceToPlayableMp4(file, setProgress);
+      const converted = new File([blob], `${file.name.replace(/\.[^.]+$/, '') || 'video'}-h264.mp4`, { type: 'video/mp4' });
+      loadFile(converted);
+      setMessage('转码完成，可以开始智能剪辑');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '转码失败，请重试');
+      setProgress(0);
+    } finally {
+      setTranscoding(false);
+    }
   };
 
   const jumpTo = (time: number) => {
@@ -406,16 +429,32 @@ export default function Home() {
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1.55fr)_minmax(360px,.75fr)]">
             <section className="overflow-hidden rounded-[24px] border border-black/[0.07] bg-[#111713] shadow-[0_22px_70px_rgba(17,29,21,0.12)]">
               <div className="relative aspect-video bg-black">
-                <video ref={videoRef} src={videoUrl} controls={!isPreviewing && status !== 'exporting'} onLoadedMetadata={e => setDuration(e.currentTarget.duration)} onTimeUpdate={onTimeUpdate} className="h-full w-full object-contain" playsInline />
+                <video ref={videoRef} src={videoUrl} controls={!isPreviewing && status !== 'exporting'} onLoadedMetadata={e => { const v = e.currentTarget; if (!v.videoWidth) { setNeedsTranscode(true); return; } setDuration(v.duration); }} onError={() => { if (status === 'ready') setNeedsTranscode(true); }} onTimeUpdate={onTimeUpdate} className="h-full w-full object-contain" playsInline />
                 {status === 'analyzing' && <div className="absolute inset-0 grid place-items-center bg-black/65 backdrop-blur-sm"><div className="w-72 text-center text-white"><div className="mx-auto mb-5 grid h-14 w-14 animate-pulse place-items-center rounded-2xl bg-[#d8ff45] text-black"><Icon name="spark" className="h-7 w-7" /></div><div className="text-lg font-semibold">正在识别有效回合</div><div className="mt-2 text-xs text-white/55">{message}</div><div className="mt-5 h-1.5 overflow-hidden rounded-full bg-white/15"><div className="h-full rounded-full bg-[#d8ff45] transition-all" style={{ width: `${progress}%` }} /></div><div className="mt-2 text-right text-xs text-[#d8ff45]">{progress}%</div></div></div>}
                 {status === 'exporting' && <div className="absolute inset-x-0 bottom-0 bg-black/80 p-4 text-white backdrop-blur"><div className="mb-2 flex items-center justify-between gap-3 text-xs"><span className="min-w-0"><span className="mr-2 rounded-full bg-[#d8ff45] px-2 py-0.5 font-semibold text-black">{exportPhase === 'recording' ? '录制' : exportPhase === 'loading' ? '加载' : exportPhase === 'converting' ? '转换' : '准备'}</span>{message}</span><span className="shrink-0 text-[#d8ff45]">{progress}%</span></div><div className="h-1 overflow-hidden rounded-full bg-white/20"><div className="h-full bg-[#d8ff45] transition-all" style={{ width: `${progress}%` }} /></div></div>}
+                {needsTranscode && status === 'ready' && (
+                  <div className="absolute inset-0 z-10 grid place-items-center bg-black/85 p-6 backdrop-blur-sm">
+                    <div className="w-full max-w-sm text-center text-white">
+                      <div className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-2xl bg-[#ffc857]/15 text-[#ffc857]"><Icon name="info" className="h-6 w-6" /></div>
+                      <div className="text-lg font-semibold">浏览器无法解码该视频</div>
+                      <p className="mt-2 text-xs leading-5 text-white/55">可能是 H.265/HEVC 或 10-bit 编码（手机“高效”模式拍摄很常见）。可在本机一键转为通用 H.264，全程不上传服务器。</p>
+                      {transcoding ? (
+                        <div className="mt-5"><div className="h-1.5 overflow-hidden rounded-full bg-white/15"><div className="h-full rounded-full bg-[#d8ff45] transition-all" style={{ width: `${progress}%` }} /></div><div className="mt-2 text-xs font-medium text-[#d8ff45]">{progress}% · {message}</div></div>
+                      ) : (
+                        <button onClick={transcodeSource} className="mt-5 rounded-xl bg-[#d8ff45] px-5 py-3 text-sm font-semibold text-[#182000] transition hover:bg-[#e5ff7a]">一键转码为 H.264</button>
+                      )}
+                      <p className="mt-4 text-[10px] leading-4 text-white/35">提示：iPhone 在 设置 → 相机 → 格式 中选择“兼容性最佳”，以后拍摄即为 H.264，无需转码。</p>
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="border-t border-white/10 bg-[#151d18] p-4 text-white">
                 <div className="flex items-center justify-between gap-4">
                   <div className="min-w-0"><div className="truncate text-sm font-medium">{file.name}</div><div className="mt-1 text-xs text-white/40">{(file.size / 1024 / 1024).toFixed(1)} MB · {formatTime(duration)}</div></div>
-                  {status === 'ready' && <button onClick={analyze} disabled={!duration} className="flex shrink-0 items-center gap-2 rounded-xl bg-[#d8ff45] px-5 py-3 text-sm font-semibold text-[#182000] transition hover:bg-[#e5ff7a] disabled:opacity-40"><Icon name="spark" className="h-4 w-4" />开始智能剪辑</button>}
+                  {status === 'ready' && <button onClick={analyze} disabled={!duration || needsTranscode || transcoding} className="flex shrink-0 items-center gap-2 rounded-xl bg-[#d8ff45] px-5 py-3 text-sm font-semibold text-[#182000] transition hover:bg-[#e5ff7a] disabled:opacity-40"><Icon name="spark" className="h-4 w-4" />开始智能剪辑</button>}
                   {status === 'done' && <button onClick={togglePreview} className="flex shrink-0 items-center gap-2 rounded-xl bg-white/10 px-4 py-2.5 text-sm font-medium transition hover:bg-white/15"><Icon name={isPreviewing ? 'pause' : 'play'} className="h-4 w-4" />{isPreviewing ? '暂停预览' : '连续预览'}</button>}
                 </div>
+                {status === 'ready' && !needsTranscode && <div className="mt-2 text-right"><button onClick={() => setNeedsTranscode(true)} className="text-[11px] text-white/30 underline underline-offset-2 transition hover:text-white/55">画面黑屏或无声？点此转码为 H.264</button></div>}
               </div>
             </section>
 
