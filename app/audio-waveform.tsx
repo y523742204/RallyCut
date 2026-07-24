@@ -14,6 +14,7 @@ type Props = {
   segmentation: { mode: SegmentationMode; reason: string; averageInterval: number; averageThreshold: number };
   onSeek: (time: number) => void;
   onAddSegment: (start: number, end: number) => boolean;
+  onUpdateSegment: (id: number, patch: { start?: number; end?: number }) => void;
 };
 
 const formatTime = (seconds: number) => {
@@ -34,10 +35,10 @@ const metric = (label: string, value: string, detail: string, accent = false) =>
   </div>
 );
 
-export function AudioWaveform({ analysis, duration, currentTime, segments, segmentation, onSeek, onAddSegment }: Props) {
+export function AudioWaveform({ analysis, duration, currentTime, segments, segmentation, onSeek, onAddSegment, onUpdateSegment }: Props) {
   // 手动框选的草稿范围(尚未创建为回合)与当前拖拽状态
   const [draft, setDraft] = useState<{ start: number; end: number } | null>(null);
-  const drag = useRef<{ mode: 'create' | 'start' | 'end'; anchor: number; moved: boolean } | null>(null);
+  const drag = useRef<{ mode: 'create' | 'start' | 'end' | 'seg-start' | 'seg-end'; anchor: number; moved: boolean; segId: number | null } | null>(null);
 
   if (!analysis.available || !analysis.waveform.length) {
     return (
@@ -71,16 +72,29 @@ export function AudioWaveform({ analysis, duration, currentTime, segments, segme
     return ratio * duration;
   };
 
-  // 按下: 落在草稿手柄附近 -> 拖手柄微调; 否则开始框选新范围
+  // 按下: 草稿手柄 > 已有回合边缘手柄 > 框选新范围
   const handlePointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
     const t = timeAt(event.clientX, event.currentTarget);
     const scale = Math.max(0.001, duration) / width;
-    let mode: 'create' | 'start' | 'end' = 'create';
+    let mode: 'create' | 'start' | 'end' | 'seg-start' | 'seg-end' = 'create';
+    let segId: number | null = null;
     if (draft) {
       if (Math.abs(t - draft.start) <= 12 * scale) mode = 'start';
       else if (Math.abs(t - draft.end) <= 12 * scale) mode = 'end';
     }
-    drag.current = { mode, anchor: t, moved: mode !== 'create' };
+    if (mode === 'create') {
+      // 已有回合边缘: 取距离最近且在判定阈值内的那条边
+      let best: { id: number; edge: 'start' | 'end'; dist: number } | null = null;
+      for (const s of segments) {
+        if (!s.keep) continue;
+        const ds = Math.abs(t - s.start);
+        const de = Math.abs(t - s.end);
+        if (ds <= 10 * scale && (!best || ds < best.dist)) best = { id: s.id, edge: 'start', dist: ds };
+        if (de <= 10 * scale && (!best || de < best.dist)) best = { id: s.id, edge: 'end', dist: de };
+      }
+      if (best) { mode = best.edge === 'start' ? 'seg-start' : 'seg-end'; segId = best.id; }
+    }
+    drag.current = { mode, anchor: t, moved: mode !== 'create', segId };
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
@@ -88,7 +102,15 @@ export function AudioWaveform({ analysis, duration, currentTime, segments, segme
     const d = drag.current;
     if (!d) return;
     const t = timeAt(event.clientX, event.currentTarget);
-    if (d.mode === 'create') {
+    if (d.mode === 'seg-start' || d.mode === 'seg-end') {
+      // 拖动已有回合边缘: 实时更新边界
+      const seg = segments.find(s => s.id === d.segId);
+      if (seg) {
+        onUpdateSegment(seg.id, d.mode === 'seg-start'
+          ? { start: Math.max(0, Math.min(t, seg.end - 0.5)) }
+          : { end: Math.min(duration, Math.max(t, seg.start + 0.5)) });
+      }
+    } else if (d.mode === 'create') {
       if (!d.moved && Math.abs(t - d.anchor) < 0.25) return; // 位移太小视为单击
       d.moved = true;
       setDraft({ start: Math.min(d.anchor, t), end: Math.max(d.anchor, t) });
@@ -113,7 +135,7 @@ export function AudioWaveform({ analysis, duration, currentTime, segments, segme
         <div>
           <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-[#eaff9b] px-2.5 py-1 text-[10px] font-semibold text-[#526d00]"><span className="h-1.5 w-1.5 rounded-full bg-[#789800]" />完整音轨</div>
           <h2 className="text-lg font-semibold tracking-tight">音频曲线分析</h2>
-          <p className="mt-1 text-xs text-black/40">击球峰值开启并维持回合，持续无峰值超过动态阈值时结束；点击曲线定位视频，按住拖动可框选范围手动创建回合。</p>
+          <p className="mt-1 text-xs text-black/40">击球峰值开启并维持回合，持续无峰值超过动态阈值时结束；点击曲线定位视频，拖动框选可创建新回合，拖动回合两端的绿色手柄可微调边界。</p>
           <div className="mt-2 flex flex-wrap gap-2 text-[10px]"><span className="rounded-full bg-black/[0.05] px-2.5 py-1 text-black/50">平均击球间隔 {averageInterval ? `${averageInterval.toFixed(2)}s` : '—'}</span><span className="rounded-full bg-black/[0.05] px-2.5 py-1 text-black/50">动态结束阈值 {dynamicThreshold.toFixed(2)}s</span></div>
         </div>
         <div className="flex flex-wrap gap-x-4 gap-y-2 text-[10px] text-black/45">
@@ -183,6 +205,20 @@ export function AudioWaveform({ analysis, duration, currentTime, segments, segme
             <path d={areaPath} fill="url(#audio-wave-fill)" />
             {analysis.hitTimes.map((time, index) => <line key={`hit-${index}`} x1={time / Math.max(0.001, duration) * width} x2={time / Math.max(0.001, duration) * width} y1="5" y2={height - 5} stroke="#ff7043" strokeWidth="2" opacity="0.9" />)}
             {analysis.silenceRegions.map((region, index) => { const x = Math.min(width, region.decisionTime / Math.max(0.001, duration) * width); return <g key={`decision-${index}`}><line x1={x} x2={x} y1="0" y2={height} stroke="#ff496c" strokeWidth="2" strokeDasharray="5 4" /><path d={`M ${x - 5} 2 L ${x + 5} 2 L ${x} 10 Z`} fill="#ff496c" /></g>; })}
+            {segments.filter(s => s.keep).map(segment => (
+              <g key={`handle-${segment.id}`}>
+                {([segment.start, segment.end] as const).map((time, i) => {
+                  const x = time / Math.max(0.001, duration) * width;
+                  return (
+                    <g key={i} style={{ cursor: 'ew-resize' }}>
+                      <rect x={x - 7} y="0" width="14" height={height} fill="transparent" />
+                      <rect x={x - 1.25} y="0" width="2.5" height={height} fill="#a8d328" opacity="0.9" />
+                      <rect x={x - 3.5} y={middle - 12} width="7" height="24" rx="3" fill="#a8d328" />
+                    </g>
+                  );
+                })}
+              </g>
+            ))}
             {draft && (() => {
               const x1 = draft.start / Math.max(0.001, duration) * width;
               const x2 = draft.end / Math.max(0.001, duration) * width;

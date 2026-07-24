@@ -22,6 +22,7 @@ const Icon = ({ name, className = 'h-5 w-5' }: { name: string; className?: strin
     pause: <><path d="M9 7v10"/><path d="M15 7v10"/></>,
     download: <><path d="M12 4v11"/><path d="m8 11 4 4 4-4"/><path d="M5 20h14"/></>,
     check: <path d="m5 12 4 4L19 6"/>,
+    x: <><path d="M18 6 6 18"/><path d="m6 6 12 12"/></>,
     clock: <><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></>,
     court: <><rect x="3" y="5" width="18" height="14" rx="1"/><path d="M12 5v14M3 12h18M7 5v14M17 5v14"/></>,
     info: <><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></>,
@@ -268,6 +269,11 @@ export default function Home() {
     return true;
   };
 
+  const deleteSegment = (id: number) => {
+    setSegments(prev => prev.filter(s => s.id !== id).map((s, index) => ({ ...s, id: index + 1 })));
+    setMessage('已删除该回合');
+  };
+
   const jumpTo = (time: number) => {
     const video = videoRef.current;
     if (!video) return;
@@ -437,7 +443,7 @@ export default function Home() {
               <p className="px-2 text-center text-[11px] leading-5 text-black/40">全程在本机处理；无法直接录制 MP4 时会自动转换，长视频需要更多时间。</p>
             </aside>
 
-            {audioAnalysis && <AudioWaveform analysis={audioAnalysis} duration={duration} currentTime={currentTime} segments={segments} segmentation={segmentationInfo} onSeek={jumpTo} onAddSegment={addSegment} />}
+            {audioAnalysis && <AudioWaveform analysis={audioAnalysis} duration={duration} currentTime={currentTime} segments={segments} segmentation={segmentationInfo} onSeek={jumpTo} onAddSegment={addSegment} onUpdateSegment={updateSegment} />}
             {segments.length > 0 && <section className="xl:col-span-2 rounded-[24px] border border-black/[0.07] bg-white p-5 shadow-[0_16px_50px_rgba(20,35,25,0.055)] sm:p-6">
               <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center"><div><h2 className="text-lg font-semibold tracking-tight">分回合选择与下载</h2><p className="mt-1 text-xs text-black/40">打开开关加入合集，或在回合卡片中单独下载 MP4</p></div><div className="flex flex-wrap items-center gap-2 text-xs"><span className="mr-1 text-black/45">已选 {keptSegments.length}/{segments.length}</span><button onClick={() => setSegments(items => items.map(item => ({ ...item, keep: true })))} disabled={status === 'exporting'} className="rounded-lg bg-[#eaff9b] px-2.5 py-1.5 font-medium text-[#526d00] disabled:opacity-40">全选</button><button onClick={() => setSegments(items => items.map(item => ({ ...item, keep: false })))} disabled={status === 'exporting'} className="rounded-lg bg-black/[0.05] px-2.5 py-1.5 font-medium text-black/50 disabled:opacity-40">清空</button></div></div>
               <div className="relative mt-6 h-16 overflow-hidden rounded-xl bg-[#f1f3f1]">
@@ -446,7 +452,7 @@ export default function Home() {
               </div>
               <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {segments.map((segment, index) => <article key={segment.id} className={`rounded-2xl border p-4 transition ${segment.keep ? 'border-[#cce66f] bg-[#fbfff1]' : 'border-black/[0.06] bg-[#f7f8f7]'}`}>
-                  <div className="flex items-start justify-between gap-3"><button onClick={() => jumpTo(segment.start)} className="flex min-w-0 items-center gap-3 text-left"><div className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl ${segment.keep ? 'bg-[#d8ff45]' : 'bg-black/5'}`}><Icon name="play" className="h-4 w-4" /></div><div><div className="text-sm font-semibold">回合 {String(index + 1).padStart(2, '0')}</div><div className="mt-0.5 text-[11px] text-black/40">置信度 {Math.round(Math.min(.97, Math.max(.61, segment.score + .28)) * 100)}%</div></div></button><button aria-label="选择或取消此回合" onClick={() => updateSegment(segment.id, { keep: !segment.keep })} disabled={status === 'exporting'} className={`relative h-6 w-11 rounded-full transition disabled:opacity-40 ${segment.keep ? 'bg-[#93bd0d]' : 'bg-black/15'}`}><span className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow transition ${segment.keep ? 'left-6' : 'left-1'}`} /></button></div>
+                  <div className="flex items-start justify-between gap-3"><button onClick={() => jumpTo(segment.start)} className="flex min-w-0 items-center gap-3 text-left"><div className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl ${segment.keep ? 'bg-[#d8ff45]' : 'bg-black/5'}`}><Icon name="play" className="h-4 w-4" /></div><div><div className="text-sm font-semibold">回合 {String(index + 1).padStart(2, '0')}</div><div className="mt-0.5 text-[11px] text-black/40">置信度 {Math.round(Math.min(.97, Math.max(.61, segment.score + .28)) * 100)}%</div></div></button><div className="flex shrink-0 items-center gap-1.5"><button aria-label="删除此回合" onClick={() => deleteSegment(segment.id)} disabled={status === 'exporting'} className="grid h-6 w-6 place-items-center rounded-full text-black/30 transition hover:bg-red-50 hover:text-red-500 disabled:opacity-40"><Icon name="x" className="h-3.5 w-3.5" /></button><button aria-label="选择或取消此回合" onClick={() => updateSegment(segment.id, { keep: !segment.keep })} disabled={status === 'exporting'} className={`relative h-6 w-11 rounded-full transition disabled:opacity-40 ${segment.keep ? 'bg-[#93bd0d]' : 'bg-black/15'}`}><span className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow transition ${segment.keep ? 'left-6' : 'left-1'}`} /></button></div></div>
                   <div className="mt-4 flex items-center gap-2"><TimeInput value={segment.start} max={segment.end - .5} onChange={value => updateSegment(segment.id, { start: value })} /><span className="text-black/25">—</span><TimeInput value={segment.end} max={duration} onChange={value => updateSegment(segment.id, { end: Math.max(segment.start + .5, value) })} /><span className="ml-auto text-[11px] font-medium text-black/40">{Math.round(segment.end - segment.start)}s</span></div>
                   <button onClick={() => exportSegment(segment, index)} disabled={status === 'exporting'} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-black/[0.08] bg-white px-3 py-2.5 text-xs font-semibold text-[#273329] shadow-sm transition hover:border-[#a8cf27] hover:bg-[#fbfff0] disabled:cursor-wait disabled:opacity-45"><Icon name="download" className="h-4 w-4" />{exportingSegmentId === segment.id ? '正在生成本回合…' : '单独下载本回合 · MP4'}</button>
                 </article>)}
