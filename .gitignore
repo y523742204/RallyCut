@@ -54,3 +54,6 @@ data/
 
 # Hermes 本地计划文件
 /.hermes/
+
+# 本地测试素材
+/import/

@@ -4,7 +4,7 @@ import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { exportHighlightsToMp4 } from '@/lib/export-mp4';
 import { analyzeAudioTrack, type AudioAnalysis } from '@/lib/audio-analysis';
 import { AudioWaveform } from './audio-waveform';
-import { buildAudioRallySegments, buildMotionRallySegments } from '@/lib/rally-segmentation';
+import { buildAudioRallySegments, buildCombinedRallySegments, buildMotionRallySegments, type SegmentationMode } from '@/lib/rally-segmentation';
 
 type Segment = {
   id: number;
@@ -103,7 +103,7 @@ export default function Home() {
   const [exportingSegmentId, setExportingSegmentId] = useState<number | null>(null);
   const [audioAnalysis, setAudioAnalysis] = useState<AudioAnalysis | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
-  const [segmentationInfo, setSegmentationInfo] = useState<{ mode: 'audio' | 'motion'; reason: string; averageInterval: number; averageThreshold: number }>({ mode: 'motion', reason: '', averageInterval: 0, averageThreshold: 2.5 });
+  const [segmentationInfo, setSegmentationInfo] = useState<{ mode: SegmentationMode; reason: string; averageInterval: number; averageThreshold: number }>({ mode: 'motion', reason: '', averageInterval: 0, averageThreshold: 2.5 });
 
   useEffect(() => () => { if (videoUrl) URL.revokeObjectURL(videoUrl); }, [videoUrl]);
   useEffect(() => {
@@ -218,11 +218,16 @@ export default function Home() {
       });
 
       const audioSegmentation = buildAudioRallySegments(audio, motionNorm, step, duration);
+      // 音频完全可信 -> 音频主导; 音频有峰值但未达门槛 -> 保留音频分析, 与画面运动融合切分; 音频完全不可用 -> 纯画面兜底
+      const canBlendAudio = audio.available && audio.hitTimes.length >= 2;
+      const mode: SegmentationMode = audioSegmentation.usedAudio ? 'audio' : (canBlendAudio ? 'combined' : 'motion');
       const finalSegments = audioSegmentation.usedAudio
         ? audioSegmentation.segments
-        : buildMotionRallySegments(motionNorm, step, duration);
+        : (canBlendAudio
+          ? buildCombinedRallySegments(audio, motionNorm, step, duration)
+          : buildMotionRallySegments(motionNorm, step, duration));
       setSegmentationInfo({
-        mode: audioSegmentation.usedAudio ? 'audio' : 'motion',
+        mode,
         reason: audioSegmentation.reason,
         averageInterval: audioSegmentation.averageInterval,
         averageThreshold: audioSegmentation.averageThreshold,
@@ -236,6 +241,7 @@ export default function Home() {
         return;
       }
       if (audioSegmentation.usedAudio) setMessage(`已按 ${audio.hitCount} 个击球峰值与持续无峰值时间识别 ${finalSegments.length} 个回合`);
+      else if (mode === 'combined') setMessage(`已结合 ${audio.hitCount} 个击球峰值与画面运动识别 ${finalSegments.length} 个回合；${audioSegmentation.reason}`);
       else setMessage(`已识别 ${finalSegments.length} 个回合；${audioSegmentation.reason}，已改用画面运动切分`);
       await seekTo(video, finalSegments[0].start);
     } catch (error) {
@@ -407,9 +413,9 @@ export default function Home() {
               <section className="rounded-[24px] border border-black/[0.07] bg-white p-5 shadow-[0_16px_50px_rgba(20,35,25,0.055)]">
                 <h3 className="text-sm font-semibold">识别依据</h3>
                 <div className="mt-4 space-y-4">
-                  <Signal label="画面运动" detail={segmentationInfo.mode === 'motion' ? '当前回合切分主依据' : '辅助过滤孤立噪声'} value={status === 'done' ? (segmentationInfo.mode === 'motion' ? 92 : 78) : 0} />
-                  <Signal label="击球声音" detail={segmentationInfo.mode === 'audio' ? `${audioAnalysis?.hitCount ?? 0} 个峰值 · 平均间隔 ${segmentationInfo.averageInterval.toFixed(2)}s` : (segmentationInfo.reason || '音频可信度不足')} value={status === 'done' && audioAnalysis?.available ? Math.round(audioAnalysis.confidence * 100) : 0} />
-                  <Signal label="持续无峰值" detail={segmentationInfo.mode === 'audio' ? `超过 ${segmentationInfo.averageThreshold.toFixed(2)}s 后结束回合` : '由画面低运动区判断结束'} value={status === 'done' ? (segmentationInfo.mode === 'audio' ? 94 : 82) : 0} />
+                  <Signal label="画面运动" detail={segmentationInfo.mode === 'motion' ? '当前回合切分主依据' : (segmentationInfo.mode === 'combined' ? '与击球声共同切分' : '辅助过滤孤立噪声')} value={status === 'done' ? (segmentationInfo.mode === 'motion' ? 92 : (segmentationInfo.mode === 'combined' ? 86 : 78)) : 0} />
+                  <Signal label="击球声音" detail={segmentationInfo.mode === 'audio' ? `${audioAnalysis?.hitCount ?? 0} 个峰值 · 平均间隔 ${segmentationInfo.averageInterval.toFixed(2)}s` : (segmentationInfo.mode === 'combined' ? `${audioAnalysis?.hitCount ?? 0} 个峰值参与修正边界` : (segmentationInfo.reason || '音频可信度不足'))} value={status === 'done' && audioAnalysis?.available ? Math.round(audioAnalysis.confidence * 100) : 0} />
+                  <Signal label="持续无峰值" detail={segmentationInfo.mode === 'audio' ? `超过 ${segmentationInfo.averageThreshold.toFixed(2)}s 后结束回合` : (segmentationInfo.mode === 'combined' ? '击球间隔与画面低运动共同判断' : '由画面低运动区判断结束')} value={status === 'done' ? (segmentationInfo.mode === 'audio' ? 94 : (segmentationInfo.mode === 'combined' ? 86 : 82)) : 0} />
                 </div>
               </section>
 

@@ -1,6 +1,7 @@
 'use client';
 
 import type { AudioAnalysis } from '@/lib/audio-analysis';
+import type { SegmentationMode } from '@/lib/rally-segmentation';
 
 type SegmentRange = { id: number; start: number; end: number; keep: boolean };
 
@@ -9,7 +10,7 @@ type Props = {
   duration: number;
   currentTime: number;
   segments: SegmentRange[];
-  segmentation: { mode: 'audio' | 'motion'; reason: string; averageInterval: number; averageThreshold: number };
+  segmentation: { mode: SegmentationMode; reason: string; averageInterval: number; averageThreshold: number };
   onSeek: (time: number) => void;
 };
 
@@ -84,6 +85,7 @@ export function AudioWaveform({ analysis, duration, currentTime, segments, segme
 
       <div className="p-4 sm:p-6">
         {segmentation.mode === 'motion' && <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">音频可信度不足，已使用画面运动切分{segmentation.reason ? `：${segmentation.reason}` : '。'}</div>}
+        {segmentation.mode === 'combined' && <div className="mb-4 rounded-2xl border border-sky-200 bg-sky-50 p-3 text-xs text-sky-800">音频未达单独使用门槛{segmentation.reason ? `（${segmentation.reason}）` : ''}，已结合击球峰值与画面运动共同切分</div>}
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-9">
           {metric('平均响度', `${analysis.averageDb.toFixed(1)} dB`, '全片 RMS 平均值')}
           {metric('峰值电平', `${analysis.peakDb.toFixed(1)} dB`, '99% 峰值')}
@@ -92,7 +94,7 @@ export function AudioWaveform({ analysis, duration, currentTime, segments, segme
           {metric('瞬态峰值', String(analysis.hitCount), '击球声候选', true)}
           {metric('平均间隔', averageInterval ? `${averageInterval.toFixed(2)} s` : '—', '近期有效击球节奏')}
           {metric('结束阈值', `${dynamicThreshold.toFixed(2)} s`, '持续无峰值等待')}
-          {metric('音频可信度', `${Math.round(analysis.confidence * 100)}%`, segmentation.mode === 'audio' ? '已用于回合切分' : '未达到使用门槛')}
+          {metric('音频可信度', `${Math.round(analysis.confidence * 100)}%`, segmentation.mode === 'audio' ? '已用于回合切分' : (segmentation.mode === 'combined' ? '已结合画面共同切分' : '未达到使用门槛'))}
           {metric('静音占比', `${Math.round(analysis.silenceRatio * 100)}%`, analysis.clippingEvents ? `${analysis.clippingEvents} 处疑似削波` : '未发现明显削波')}
         </div>
 

@@ -2,6 +2,9 @@ import type { AudioAnalysis } from './audio-analysis';
 
 export type RallySegment = { start: number; end: number; score: number };
 
+// audio = 音频主导切分; combined = 音频未达单独使用门槛, 但保留击球峰值与画面运动融合切分; motion = 音频完全不可用, 纯画面兜底
+export type SegmentationMode = 'audio' | 'combined' | 'motion';
+
 export type AudioSegmentationResult = {
   usedAudio: boolean;
   segments: RallySegment[];
@@ -86,6 +89,42 @@ export function buildAudioRallySegments(
 
   if (!merged.length) return { usedAudio: false, segments: [], reason: '峰值序列缺少连续对打特征', averageInterval, averageThreshold };
   return { usedAudio: true, segments: merged, reason: '', averageInterval, averageThreshold };
+}
+
+export function buildCombinedRallySegments(
+  audio: AudioAnalysis,
+  motion: number[],
+  step: number,
+  duration: number,
+): RallySegment[] {
+  const motionSegments = buildMotionRallySegments(motion, step, duration);
+  if (!audio.available || audio.hitTimes.length === 0) return motionSegments;
+
+  // 用击球峰值修正画面段落边界: 有峰值佐证的段吸附到首/尾击球点并提分, 无佐证的段保留画面边界但降分
+  const snapped = motionSegments.map(seg => {
+    const hits = audio.hitTimes.filter(t => t >= seg.start - 0.6 && t <= seg.end + 0.6);
+    if (hits.length < 2) return { ...seg, score: clamp(seg.score * 0.9, 0.3, 0.9) };
+    const firstHit = hits[0];
+    const lastHit = hits[hits.length - 1];
+    return {
+      start: Math.max(0, firstHit - 1),
+      end: Math.min(duration, lastHit + 0.65),
+      score: clamp(seg.score * 0.55 + audio.confidence * 0.3 + Math.min(0.15, hits.length * 0.02), 0.4, 0.97),
+    };
+  });
+
+  // 边界吸附后可能重叠或靠得过近, 合并
+  const merged: RallySegment[] = [];
+  for (const seg of snapped.sort((a, b) => a.start - b.start)) {
+    const last = merged[merged.length - 1];
+    if (last && seg.start - last.end < 0.6) {
+      last.end = Math.max(last.end, seg.end);
+      last.score = Math.max(last.score, seg.score);
+    } else if (seg.end - seg.start >= 1.2) {
+      merged.push({ ...seg });
+    }
+  }
+  return merged.length ? merged : motionSegments;
 }
 
 export function buildMotionRallySegments(motion: number[], step: number, duration: number): RallySegment[] {
