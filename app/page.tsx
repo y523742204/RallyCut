@@ -254,17 +254,18 @@ export default function Home() {
     setSegments(items => items.map(item => item.id === id ? { ...item, ...patch } : item));
   };
 
-  // 波形框选手动创建回合: 与现有回合重叠时拒绝, 插入后按时间排序并重排 id
-  const addSegment = (start: number, end: number) => {
+  // 波形框选手动创建回合: 与现有回合重叠时拒绝(返回 false), 插入后按时间排序并重排 id
+  const addSegment = (start: number, end: number): boolean => {
     if (segments.some(s => start < s.end - 0.1 && end > s.start + 0.1)) {
       setMessage('新回合与现有回合重叠，请拖动手柄调整范围后再创建');
-      return;
+      return false;
     }
     setSegments(prev => [...prev, { id: 0, start, end, score: 1, keep: true }]
       .sort((a, b) => a.start - b.start)
       .map((s, index) => ({ ...s, id: index + 1 })));
     setMessage(`已创建新回合（${formatTime(start)} - ${formatTime(end)}），默认加入合集`);
     jumpTo(start);
+    return true;
   };
 
   const jumpTo = (time: number) => {

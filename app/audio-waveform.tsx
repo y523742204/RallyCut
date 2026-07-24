@@ -13,7 +13,7 @@ type Props = {
   segments: SegmentRange[];
   segmentation: { mode: SegmentationMode; reason: string; averageInterval: number; averageThreshold: number };
   onSeek: (time: number) => void;
-  onAddSegment: (start: number, end: number) => void;
+  onAddSegment: (start: number, end: number) => boolean;
 };
 
 const formatTime = (seconds: number) => {
@@ -140,19 +140,24 @@ export function AudioWaveform({ analysis, duration, currentTime, segments, segme
           {metric('静音占比', `${Math.round(analysis.silenceRatio * 100)}%`, analysis.clippingEvents ? `${analysis.clippingEvents} 处疑似削波` : '未发现明显削波')}
         </div>
 
-        {draft && (
-          <div className="mt-4 flex flex-wrap items-center gap-2 rounded-2xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
-            <span className="font-medium">已选 {formatTime(draft.start)} - {formatTime(draft.end)}（{(draft.end - draft.start).toFixed(1)}s），可拖动两端手柄微调</span>
-            <span className="flex-1" />
-            <button
-              onClick={() => { onAddSegment(draft.start, draft.end); setDraft(null); }}
-              disabled={draft.end - draft.start < 1}
-              title={draft.end - draft.start < 1 ? '回合至少 1 秒' : undefined}
-              className="rounded-lg bg-[#17211b] px-3 py-1.5 font-semibold text-white transition hover:bg-black disabled:opacity-40"
-            >创建新回合</button>
-            <button onClick={() => setDraft(null)} className="rounded-lg px-2.5 py-1.5 font-medium text-sky-700 transition hover:bg-sky-100">取消</button>
-          </div>
-        )}
+        {draft && (() => {
+          const draftTooShort = draft.end - draft.start < 1;
+          const draftOverlap = segments.some(s => draft.start < s.end - 0.1 && draft.end > s.start + 0.1);
+          return (
+            <div className={`mt-4 flex flex-wrap items-center gap-2 rounded-2xl border px-3 py-2 text-xs ${draftOverlap ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-sky-200 bg-sky-50 text-sky-900'}`}>
+              <span className="font-medium">已选 {formatTime(draft.start)} - {formatTime(draft.end)}（{(draft.end - draft.start).toFixed(1)}s），可拖动两端手柄微调</span>
+              {draftOverlap && <span className="font-semibold">与现有回合重叠，请调整范围</span>}
+              {!draftOverlap && draftTooShort && <span className="font-semibold">回合至少 1 秒</span>}
+              <span className="flex-1" />
+              <button
+                onClick={() => { if (onAddSegment(draft.start, draft.end)) setDraft(null); }}
+                disabled={draftTooShort || draftOverlap}
+                className="rounded-lg bg-[#17211b] px-3 py-1.5 font-semibold text-white transition hover:bg-black disabled:opacity-40"
+              >创建新回合</button>
+              <button onClick={() => setDraft(null)} className="rounded-lg px-2.5 py-1.5 font-medium text-sky-700 transition hover:bg-sky-100">取消</button>
+            </div>
+          );
+        })()}
 
         <div className="mt-5 overflow-hidden rounded-2xl border border-black/[0.06] bg-[#111713] p-3 sm:p-4">
           <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} style={{ touchAction: 'pan-y' }} className="h-40 w-full cursor-crosshair" role="img" aria-label="音频波形，点击定位视频，拖动框选创建回合">
